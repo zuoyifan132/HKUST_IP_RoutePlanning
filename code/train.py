@@ -35,8 +35,21 @@ def env_step()          # one step
 """
 
 # Reset the environment
+# Train single agent and by default train the first agent
+# Maybe changed later
 def env_reset(filename):
-    return import_mapf_instance(filename)
+    #----------------------------------------------#
+
+    # TODO:
+    # Train each agent
+
+    # ---------------------------------------------#
+    my_map, starts, goals = import_mapf_instance(filename)
+    start, goal = starts[0], goals[0]
+    return my_map, start, goal
+
+# Get reward and next state
+def Nextstep(a):
 
 
 # 定义Net类 (定义网络)
@@ -56,7 +69,7 @@ class Net(nn.Module):
         return actions_value                                                    # 返回动作值
 
 
-# 定义DQN类 (定义两个网络)
+# Define DQN (define two network)
 class DQN(object):
     def __init__(self):                                                         # 定义DQN的一系列属性
         self.eval_net, self.target_net = Net(), Net()                           # 利用Net创建两个神经网络: 评估网络和目标网络
@@ -67,6 +80,16 @@ class DQN(object):
         self.loss_func = nn.MSELoss()                                           # 使用均方损失函数 (loss(xi, yi)=(xi-yi)^2)
 
     def choose_action(self, x):                                                 # 定义动作选择函数 (x为状态)
+
+        # ----------------------------------------------#
+
+        # TODO:
+        # should we wrap up all info about the current state of agent into a feature vector?
+        # all info contains current position, map info, other agents info, treat other agent as block?
+        # the action have only 4 possible movement, should we use softmax output a distribution?
+
+        # ---------------------------------------------#
+
         x = torch.unsqueeze(torch.FloatTensor(x), 0)                            # 将x转换成32-bit floating point形式，并在dim=0增加维数为1的维度
         if np.random.uniform() < EPSILON:                                       # 生成一个在[0, 1)内的随机数，如果小于EPSILON，选择最优动作
             actions_value = self.eval_net.forward(x)                            # 通过对评估网络输入状态x，前向传播获得动作值
@@ -116,23 +139,24 @@ class DQN(object):
 
  
 def train(filename):
-    dqn = DQN()                                                             # 令dqn=DQN类
-    my_map, starts, goals = env_reset(filename)                             # initial state: map, starts, goals
+    dqn = DQN()                                                         # initialize a dqn
+    my_map, start, goal = env_reset(filename)                           # initial state: map, starts, goals
 
-    for i in range(400):                                                    # 400个episode循环
+    for i in range(400):                                                # 400 episode loop
         print('<<<<<<<<<Episode: %s' % i)
-        s = env_reset                                                       # reset environment
-        episode_reward_sum = 0                                              # 初始化该循环对应的episode的总奖励
+        cur_map, cur_pos, cur_goal = my_map, start, goal                # reset environment
+        episode_reward_sum = 0                                          # initialize current episode total reward
 
-        while True:                                                         # 开始一个episode (每一个循环代表一步)
-            a = dqn.choose_action(s)                                        # 输入该步对应的状态s，选择动作
-            s_, r, done = env.step(a)                                       # 执行动作，获得反馈
+        while True:                                                     # start an episode (each loop indicates a step)
+            s = (cur_map, cur_pos)                                      # state consists of current map and position
+            a = dqn.choose_action(s)                                    # input the current state and choose an action
+            s_, r, done = Nextstep(a)                                   # conduct action and require feedback, how to get reward r?
 
-            # 修改奖励 (不修改也可以，修改奖励只是为了更快地得到训练好的摆杆)
-            x, x_dot, theta, theta_dot = s_
-            r1 = (env.x_threshold - abs(x)) / env.x_threshold - 0.8
-            r2 = (env.theta_threshold_radians - abs(theta)) / env.theta_threshold_radians - 0.5
-            new_r = r1 + r2
+            # modify reward (it could be original reward，modify reward for better train speed)
+            # x, x_dot, theta, theta_dot = s_
+            # r1 = (env.x_threshold - abs(x)) / env.x_threshold - 0.8
+            # r2 = (env.theta_threshold_radians - abs(theta)) / env.theta_threshold_radians - 0.5
+            # new_r = r1 + r2
 
             dqn.store_transition(s, a, new_r, s_)                 # 存储样本
             episode_reward_sum += new_r                           # 逐步加上一个episode内每个step的reward
