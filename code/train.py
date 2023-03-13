@@ -5,6 +5,7 @@ import numpy as np                              # 导入numpy
 import argparse
 
 from run_experiments import import_mapf_instance
+from agent import Agent
 
 # 超参数
 BATCH_SIZE = 32                                 # 样本数量
@@ -14,7 +15,7 @@ GAMMA = 0.9                                     # reward discount: close to 0 we
 TARGET_REPLACE_ITER = 100                       # 目标网络更新频率
 MEMORY_CAPACITY = 2000                          # 记忆库容量
 N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
-N_STATES = 3                                    # state has 3 dimension: map, starts, goals
+N_STATES = 0                                    # an agent state include the agent position and map state
 
 
 """
@@ -37,7 +38,7 @@ def env_step()          # one step
 # Reset the environment
 # Train single agent and by default train the first agent
 # Maybe changed later
-def env_reset(filename):
+def env_reset(filename, agent):
     #----------------------------------------------#
 
     # TODO:
@@ -45,12 +46,22 @@ def env_reset(filename):
 
     # ---------------------------------------------#
     my_map, starts, goals = import_mapf_instance(filename)
-    start, goal = starts[0], goals[0]
+
+    # treat other agents as block, true indicates block, exclude itself as block
+    for x,y in starts[1:]:
+        my_map[x][y] = True
+
+    # True as 1 and False as 0
+    for i in range(len(my_map)):
+        for j in range(len(my_map[0])):
+            my_map[i][j] = 0 if not my_map[i][j] else 1
+
+    start, goal = starts[agent.index], goals[agent.index]
     return my_map, start, goal
 
 # Get reward and next state
 def Nextstep(a):
-
+    pass
 
 # 定义Net类 (定义网络)
 class Net(nn.Module):
@@ -79,25 +90,39 @@ class DQN(object):
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)    # 使用Adam优化器 (输入为评估网络的参数和学习率)
         self.loss_func = nn.MSELoss()                                           # 使用均方损失函数 (loss(xi, yi)=(xi-yi)^2)
 
-    def choose_action(self, x):                                                 # 定义动作选择函数 (x为状态)
+    def choose_action(self, state):                                             # 定义动作选择函数 (x为状态)
 
         # ----------------------------------------------#
 
         # TODO:
-        # should we wrap up all info about the current state of agent into a feature vector?
-        # all info contains current position, map info, other agents info, treat other agent as block?
-        # the action have only 4 possible movement, should we use softmax output a distribution?
+        # should we wrap up all info about the current state of agent into a feature vector? should be a matrix
+        # all info contains current position, map info, other agents info, treat other agent as block? Yes
+        # the action have only 4 possible movement, should we use softmax output a distribution?   Yes
+
+        cur_map, cur_pos = state
+        cur_map[cur_pos[0]][cur_pos[1]] = 2                                     # 2 indicates the current position in the map
+        x = torch.FloatTensor(cur_map).view(-1, 1)                              # vectorized the matrx
 
         # ---------------------------------------------#
 
-        x = torch.unsqueeze(torch.FloatTensor(x), 0)                            # 将x转换成32-bit floating point形式，并在dim=0增加维数为1的维度
-        if np.random.uniform() < EPSILON:                                       # 生成一个在[0, 1)内的随机数，如果小于EPSILON，选择最优动作
-            actions_value = self.eval_net.forward(x)                            # 通过对评估网络输入状态x，前向传播获得动作值
-            action = torch.max(actions_value, 1)[1].data.numpy()                # 输出每一行最大值的索引，并转化为numpy ndarray形式
-            action = action[0]                                                  # 输出action的第一个数
-        else:                                                                   # 随机选择动作
-            action = np.random.randint(0, N_ACTIONS)                            # 这里action随机等于0或1 (N_ACTIONS = 2)
-        return action                                                           # 返回选择的动作 (0或1)
+        if np.random.uniform() < EPSILON:                                       # choose network best action or random action base on epsilon
+            actions_value = self.eval_net.forward(x)                            # get action value
+            action_index = int(torch.argmax(actions_value))                     # get the index of most possible action
+        else:                                                                   # random action
+            action_index = np.random.randint(0, N_ACTIONS)                      # random action of the five action
+
+        if action_index == 0:                                                   # go up
+            action = [1, 0]
+        elif action_index == 1:                                                 # go down
+            action = [-1, 0]
+        if action_index == 2:                                                   # go right
+            action = [0, 1]
+        if action_index == 3:                                                   # go left
+            action = [0, -1]
+        else:                                                                   # stay
+            action = [0, 0]
+
+        return action
 
     def store_transition(self, s, a, r, s_):                                    # 定义记忆存储函数 (这里输入为一个transition)
         transition = np.hstack((s, [a, r], s_))                                 # 在水平方向上拼接数组
@@ -137,10 +162,11 @@ class DQN(object):
         loss.backward()                                                 # 误差反向传播, 计算参数更新值
         self.optimizer.step()                                           # 更新评估网络的所有参数
 
- 
-def train(filename):
+
+def train(filename, agent):
     dqn = DQN()                                                         # initialize a dqn
-    my_map, start, goal = env_reset(filename)                           # initial state: map, starts, goals
+    my_map, start, goal = env_reset(filename, agent)                    # initial state: map, starts, goals
+    N_STATES = len(my_map) * len(my_map[0])
 
     for i in range(400):                                                # 400 episode loop
         print('<<<<<<<<<Episode: %s' % i)
@@ -148,9 +174,10 @@ def train(filename):
         episode_reward_sum = 0                                          # initialize current episode total reward
 
         while True:                                                     # start an episode (each loop indicates a step)
-            s = (cur_map, cur_pos)                                      # state consists of current map and position
+            s = [cur_map, cur_pos]                                      # state consists of current map(block,other agents as block) and position
             a = dqn.choose_action(s)                                    # input the current state and choose an action
-            s_, r, done = Nextstep(a)                                   # conduct action and require feedback, how to get reward r?
+            # reward: agent achieve goal: +0, collision: -inf, gonext: -1
+            s_, r, done = agent.nextStep(a)                             # conduct action and require feedback, how to get reward r?
 
             # modify reward (it could be original reward，modify reward for better train speed)
             # x, x_dot, theta, theta_dot = s_
@@ -180,4 +207,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     filename = args.instance
 
-    train(filename)
+    index = 0;
+    agent = Agent()
+
+    #train(filename)
