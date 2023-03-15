@@ -47,21 +47,18 @@ def env_reset(filename, agent):
     # ---------------------------------------------#
     my_map, starts, goals = import_mapf_instance(filename)
 
-    # treat other agents as block, true indicates block, exclude itself as block
-    for x,y in starts[1:]:
-        my_map[x][y] = True
-
     # True as 1 and False as 0
     for i in range(len(my_map)):
         for j in range(len(my_map[0])):
             my_map[i][j] = 0 if not my_map[i][j] else 1
 
+    # treat other agents as block indicated by 2, true indicates block, exclude itself as block
+    for x,y in starts[1:]:
+        my_map[x][y] = 2
+
     start, goal = starts[agent.index], goals[agent.index]
     return my_map, start, goal
 
-# Get reward and next state
-def Nextstep(a):
-    pass
 
 # 定义Net类 (定义网络)
 class Net(nn.Module):
@@ -69,9 +66,9 @@ class Net(nn.Module):
         # nn.Module的子类函数必须在构造函数中执行父类的构造函数
         super(Net, self).__init__()                                             # 等价与nn.Module.__init__()
 
-        self.fc1 = nn.Linear(N_STATES, 50)                                      # 设置第一个全连接层(输入层到隐藏层): 状态数个神经元到50个神经元
+        self.fc1 = nn.Linear(N_STATES, 64)                                      # 设置第一个全连接层(输入层到隐藏层): 状态数个神经元到50个神经元
         self.fc1.weight.data.normal_(0, 0.1)                                    # 权重初始化 (均值为0，方差为0.1的正态分布)
-        self.fc2 = nn.Linear(50, N_ACTIONS)                                     # 设置第二个全连接层(隐藏层到输出层): 50个神经元到动作数个神经元
+        self.fc2 = nn.Linear(64, N_ACTIONS)                                     # 设置第二个全连接层(隐藏层到输出层): 50个神经元到动作数个神经元
         self.fc2.weight.data.normal_(0, 0.1)                                    # 权重初始化 (均值为0，方差为0.1的正态分布)
 
     def forward(self, x):                                                       # 定义forward函数 (x为状态)
@@ -174,30 +171,23 @@ def train(filename, agent):
         episode_reward_sum = 0                                          # initialize current episode total reward
 
         while True:                                                     # start an episode (each loop indicates a step)
-            s = [cur_map, cur_pos]                                      # state consists of current map(block,other agents as block) and position
+            s = [cur_map, agent.pos]                                    # state consists of current map(block,other agents as block) and position
             a = dqn.choose_action(s)                                    # input the current state and choose an action
-            # reward: agent achieve goal: +0, collision: -inf, gonext: -1
-            s_, r, done = agent.nextStep(a)                             # conduct action and require feedback, how to get reward r?
+            s_, r, done = agent.nextStep(a, cur_map, goal)              # conduct action and require feedback,
 
-            # modify reward (it could be original reward，modify reward for better train speed)
-            # x, x_dot, theta, theta_dot = s_
-            # r1 = (env.x_threshold - abs(x)) / env.x_threshold - 0.8
-            # r2 = (env.theta_threshold_radians - abs(theta)) / env.theta_threshold_radians - 0.5
-            # new_r = r1 + r2
+            dqn.store_transition(s, a, r, s_)                           # store transition
+            episode_reward_sum += r                                     # aggregate total reward
 
-            dqn.store_transition(s, a, new_r, s_)                 # 存储样本
-            episode_reward_sum += new_r                           # 逐步加上一个episode内每个step的reward
+            s = s_                                                      # update state
 
-            s = s_                                                # 更新状态
-
-            if dqn.memory_counter > MEMORY_CAPACITY:              # 如果累计的transition数量超过了记忆库的固定容量2000
-                # 开始学习 (抽取记忆，即32个transition，并对评估网络参数进行更新，并在开始学习后每隔100次将评估网络的参数赋给目标网络)
+            if dqn.memory_counter > MEMORY_CAPACITY:                    # trigger learning if 2000 memory capacity full
+                # start learning, (random select 32 transition and update eval_net)
+                # after 100 times learning, assign the eval_net to target_net
                 dqn.learn()
 
-            if done:       # 如果done为True
-                # round()方法返回episode_reward_sum的小数点四舍五入到2个数字
+            if done:                                                    # if finished
                 print('episode%s---reward_sum: %s' % (i, round(episode_reward_sum, 2)))
-                break                                             # 该episode结束
+                break
 
 
 if __name__ == '__main__':
@@ -207,7 +197,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     filename = args.instance
 
-    index = 0;
-    agent = Agent()
+    index = 0
+    _, starts, goals = import_mapf_instance(filename)
+    agent = Agent(index, list(starts[index]), goals[index])
 
-    #train(filename)
+    train(filename, agent)
