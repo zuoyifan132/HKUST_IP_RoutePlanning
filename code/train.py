@@ -93,7 +93,7 @@ class DQN(object):
         # Define the compound data type for the transition
         transition_dtype = np.dtype([
             ('state', np.float64, (1, N_STATES)),
-            ('action', np.int64, (1, 2)),
+            ('action', np.int64),
             ('reward', np.float64),
             ('next_state',  np.float64, (1, N_STATES)),
             ('done', bool)
@@ -134,21 +134,22 @@ class DQN(object):
 
         b_memory = self.memory[sample_index]                                    # get the corresponding transition
 
-        #b_s = torch.FloatTensor(b_memory["state"])
-        b_s = torch.from_numpy(np.copy(b_memory["state"])).float()
-        b_a = torch.from_numpy(np.copy(b_memory["action"])).long()
-        b_r = torch.from_numpy(np.copy(b_memory["reward"])).float()
-        b_s_ = torch.from_numpy(np.copy(b_memory["next_state"])).float()
+        b_s = torch.from_numpy(np.copy(b_memory["state"])).float().squeeze()
+        b_a = torch.from_numpy(np.copy(b_memory["action"])).long().unsqueeze(0) # use unsqueeze to change [32] to [32, 1]
+        b_r = torch.from_numpy(np.copy(b_memory["reward"])).float().squeeze()
+        b_s_ = torch.from_numpy(np.copy(b_memory["next_state"])).float().squeeze()
 
         # 获取32个transition的评估值和目标值，并利用损失函数和优化器进行评估网络参数更新
         # get the evaluate q value
-        q_eval = self.eval_net(b_s).squeeze().gather(1, b_a)                    # squeeze the dim from [32, 1, 5] to [32, 5]
+        q_eval = self.eval_net(b_s).gather(1, b_a)                              # get the corresponding value of Q_value
 
         # eval_net(b_s)通过评估网络输出32行每个b_s对应的一系列动作值，然后.gather(1, b_a)代表对每行对应索引b_a的Q值提取进行聚合
-        q_next = self.target_net(b_s_).detach()
+        q_next = self.target_net(b_s_).detach().squeeze()
+
         # q_next不进行反向传递误差，所以detach；q_next表示通过目标网络输出32行每个b_s_对应的一系列动作值
-        q_target = b_r + GAMMA * q_next.max(1)[0].view(BATCH_SIZE, 1)
+        q_target = b_r + GAMMA * q_next.max(1)[0].unsqueeze(0)
         # q_next.max(1)[0]表示只返回每一行的最大值，不返回索引(长度为32的一维张量)；.view()表示把前面所得到的一维张量变成(BATCH_SIZE, 1)的形状；最终通过公式得到目标值
+
         loss = self.loss_func(q_eval, q_target)
         # 输入32个评估值和32个目标值，使用均方损失函数
         self.optimizer.zero_grad()                                      # 清空上一步的残余更新参数值
