@@ -11,22 +11,13 @@ from agent import Agent
 # 超参数
 BATCH_SIZE = 32                                 # 样本数量
 LR = 0.01                                       # 学习率
-EPSILON = 0.1                                   # greedy policy
+EPSILON = 0.9                                   # greedy policy
 GAMMA = 0.9                                     # reward discount: close to 0 weights more on immediate and close 1 weight more on future reward
 TARGET_REPLACE_ITER = 100                       # 目标网络更新频率
 MEMORY_CAPACITY = 1000                          # 记忆库容量
 N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
-N_STATES = 28                                   # an agent state include the agent position and map state
+N_STATES = 100                                  # an agent state include the agent position and map state
 
-
-"""
-torch.nn是专门为神经网络设计的模块化接口。nn构建于Autograd之上，可以用来定义和运行神经网络。
-nn.Module是nn中十分重要的类，包含网络各层的定义及forward方法。
-定义网络：
-    需要继承nn.Module类，并实现forward方法。
-    一般把网络中具有可学习参数的层放在构造函数__init__()中。
-    只要在nn.Module的子类中定义了forward函数，backward函数就会被自动实现(利用Autograd)。
-"""
 
 # action map: 0: up, 1: down, 2: right, 3: left, 4: stay
 Action_map = {0: [1, 0], 1: [-1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
@@ -90,6 +81,12 @@ class DQN(object):
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=LR)    # adam optimizer
         self.loss_func = nn.MSELoss()                                           # mean square error loss
 
+        # load the state to the target network if the path is not None
+        try:
+            self.target_net.load_state_dict(torch.load("target_net.pth"))
+        except:
+            print("No target_net.pth file, train from scratch")
+
         # Define the compound data type for the transition
         transition_dtype = np.dtype([
             ('state', np.float64, (1, N_STATES)),
@@ -139,20 +136,13 @@ class DQN(object):
         b_r = torch.from_numpy(np.copy(b_memory["reward"])).float().squeeze()
         b_s_ = torch.from_numpy(np.copy(b_memory["next_state"])).float().squeeze()
 
-        # 获取32个transition的评估值和目标值，并利用损失函数和优化器进行评估网络参数更新
         # get the evaluate q value
         q_eval = self.eval_net(b_s).gather(1, b_a)                              # get the corresponding value of Q_value
-
-        # eval_net(b_s)通过评估网络输出32行每个b_s对应的一系列动作值，然后.gather(1, b_a)代表对每行对应索引b_a的Q值提取进行聚合
         q_next = self.target_net(b_s_).detach().squeeze()
-
-        # q_next不进行反向传递误差，所以detach；q_next表示通过目标网络输出32行每个b_s_对应的一系列动作值
         q_target = b_r + GAMMA * q_next.max(1)[0].unsqueeze(0)
-        # q_next.max(1)[0]表示只返回每一行的最大值，不返回索引(长度为32的一维张量)；.view()表示把前面所得到的一维张量变成(BATCH_SIZE, 1)的形状；最终通过公式得到目标值
 
         loss = self.loss_func(q_eval, q_target)
-        # 输入32个评估值和32个目标值，使用均方损失函数
-        self.optimizer.zero_grad()                                      # 清空上一步的残余更新参数值
+        self.optimizer.zero_grad()                                      # clear the last stage remaining updating parameter
         loss.backward()                                                 # 误差反向传播, 计算参数更新值
         self.optimizer.step()                                           # 更新评估网络的所有参数
 
@@ -189,6 +179,9 @@ def train(map, starts, agent):
 
             if done:                                                    # if finished
                 break
+
+    # save the net state
+    torch.save(dqn.target_net.state_dict(), "target_net.pth")
 
 
 if __name__ == '__main__':
