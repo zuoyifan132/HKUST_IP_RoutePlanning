@@ -14,7 +14,7 @@ from agent import Agent
 # 超参数
 BATCH_SIZE = 32
 LR = 0.01
-EPSILON = 0.1
+EPSILON = 1.0
 GAMMA = 0.9           # reward discount: cse to 0 weights more on immediate and close 1 weight more on future reward
 TARGET_REPLACE_ITER = 100
 MEMORY_CAPACITY = 1000
@@ -41,14 +41,17 @@ def env_reset(my_map, starts, agent):
 
     # ---------------------------------------------#
 
-    # True as 1 and False as 0
+    # 1: free grid, 2: block, 3: other agent
     for i in range(len(my_map)):
         for j in range(len(my_map[0])):
-            my_map[i][j] = 0 if not my_map[i][j] else 1
+            my_map[i][j] = 1 if not my_map[i][j] else 2
 
-    # treat other agents as block indicated by 2, true indicates block, exclude itself as block
+    # treat other agents as block indicated by 3, true indicates block, exclude itself as block
     for x,y in starts[1:]:
-        my_map[x][y] = 2
+        my_map[x][y] = 3
+
+    # treat self as 4
+    my_map[starts[0][0]][starts[0][1]] = 4
 
     # reset agent
     agent.reset_agent()
@@ -85,20 +88,22 @@ def find_solution(agent, starts, map):
     all_path = []
     net = Net()
     net.load_state_dict(torch.load("target_net.pth"))       # load the trained state
-
+    print(net.state_dict())
     cur_map = env_reset(map, starts, agent)
 
-    cur_map[agent.pos[0]][agent.pos[1]] = 3                 # 3 indicates the current position in the map
+    cur_map[agent.pos[0]][agent.pos[1]] = 4                 # 4 indicates the current position in the map
     s = torch.FloatTensor(cur_map).view(1, -1)              # matrx to a row indicate the state
 
     path = [tuple(agent.pos)]                               # the agent path
 
     while True:
+        print("Loop")
         a = choose_action(net, s)                           # input the current state and choose an action
+        print("action: ", a)
         s_, r, done = agent.nextStep(a, cur_map)            # conduct action and require feedback,
 
         cur_map, cur_pos = s_                               # unwrap the next state
-        cur_map[cur_pos[0]][cur_pos[1]] = 3                 # 3 indicates the current position in the map
+        cur_map[cur_pos[0]][cur_pos[1]] = 4                 # 4 indicates the current position in the map
         s_ = torch.FloatTensor(cur_map).view(1, -1)         # matrx to a row indicate the state
 
         path.append(tuple(agent.pos))
@@ -126,14 +131,14 @@ if __name__ == '__main__':
                         help='The name of the instance file(s)')
     args = parser.parse_args()
     filename = args.instance
-
+    print("1")
     index = 0
     my_map, starts, goals = import_mapf_instance(filename)
     pos = list(starts[index])
     agent = Agent(index, pos, goals[index])
-
+    print("2")
     path = find_solution(agent, copy.deepcopy(starts), copy.deepcopy(my_map))
-
+    print("3")
     print("all path: ", path)
 
     animation = Animation(my_map, starts, goals, path)

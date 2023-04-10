@@ -1,25 +1,27 @@
-import torch                                    # 导入torch
-import torch.nn as nn                           # 导入torch.nn
-import torch.nn.functional as F                 # 导入torch.nn.functional
-import numpy as np                              # 导入numpy
+import sys
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 import argparse
 import copy
 
 from run_experiments import import_mapf_instance
 from agent import Agent
 
-# 超参数
-BATCH_SIZE = 32                                 # 样本数量
-LR = 0.01                                       # 学习率
+# hyper parameters
+BATCH_SIZE = 32                                 # batch size
+LR = 1e-3                                       # learning rate
 EPSILON = 0.9                                   # greedy policy
 GAMMA = 0.9                                     # reward discount: close to 0 weights more on immediate and close 1 weight more on future reward
-TARGET_REPLACE_ITER = 100                       # 目标网络更新频率
-MEMORY_CAPACITY = 1000                          # 记忆库容量
+TARGET_REPLACE_ITER = 100                       # target update frequency
+MEMORY_CAPACITY = 1000                          # memory capacity
 N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
 N_STATES = 100                                  # an agent state include the agent position and map state
 
 
-# action map: 0: up, 1: down, 2: right, 3: left, 4: stay
+# action map: 1: up, 2: down, 3: right, 4: left, 5: stay
 Action_map = {0: [1, 0], 1: [-1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
 Index_action_map = {(1, 0): 0, (-1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
 
@@ -41,14 +43,17 @@ def env_reset(my_map, starts, agent):
 
     # ---------------------------------------------#
 
-    # True as 1 and False as 0
+    # 1: free grid, 2: block, 3: other agent
     for i in range(len(my_map)):
         for j in range(len(my_map[0])):
-            my_map[i][j] = 0 if not my_map[i][j] else 1
+            my_map[i][j] = 1 if not my_map[i][j] else 2
 
-    # treat other agents as block indicated by 2, true indicates block, exclude itself as block
+    # treat other agents as block indicated by 3, true indicates block, exclude itself as block
     for x,y in starts[1:]:
-        my_map[x][y] = 2
+        my_map[x][y] = 3
+
+    # treat self as 4
+    my_map[starts[0][0]][starts[0][1]] = 4
 
     # reset agent
     agent.reset_agent()
@@ -56,7 +61,7 @@ def env_reset(my_map, starts, agent):
     return my_map
 
 
-# 定义Net类 (定义网络)
+# Net class (define network)
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -102,7 +107,7 @@ class DQN(object):
             actions_value = self.eval_net.forward(x)                            # get action value from target net work
             action_index = int(torch.argmax(actions_value))                     # get the index of most possible action
         else:                                                                   # random action
-            action_index = np.random.randint(0, N_ACTIONS)                      # random action of the five action
+            action_index = np.random.randint(1, N_ACTIONS)                      # random action of the five action
 
         return Action_map[action_index]
 
@@ -110,7 +115,7 @@ class DQN(object):
     def store_transition(self, s, a, r, s_, done):
         s_ = torch.FloatTensor(s_).view(1, -1)                                  # change the s_ shape to a row: 1*64
         # if the memory is full, overwrite the old transition
-        index = self.memory_counter % MEMORY_CAPACITY                           # 获取transition要置入的行数
+        index = self.memory_counter % MEMORY_CAPACITY                           # if memory is full, overwrite the old memory with new memory
 
         self.memory[index]['state'] = s
         self.memory[index]['action'] = Index_action_map[tuple(a)]               # store the action index instead of action
@@ -118,7 +123,7 @@ class DQN(object):
         self.memory[index]['next_state'] = s_
         self.memory[index]['done'] = done
 
-        self.memory_counter += 1                                                # memory_counter自加1
+        self.memory_counter += 1                                                # memory_counter + 1
 
     # Learning evaluate network to update the target network
     def learn(self):
@@ -132,19 +137,25 @@ class DQN(object):
         b_memory = self.memory[sample_index]                                    # get the corresponding transition
 
         b_s = torch.from_numpy(np.copy(b_memory["state"])).float().squeeze()
-        b_a = torch.from_numpy(np.copy(b_memory["action"])).long().unsqueeze(0) # use unsqueeze to change [32] to [32, 1]
+        b_a = torch.from_numpy(np.copy(b_memory["action"])).long().unsqueeze(0) # use un-squeeze to change [32] to [32, 1]
         b_r = torch.from_numpy(np.copy(b_memory["reward"])).float().squeeze()
         b_s_ = torch.from_numpy(np.copy(b_memory["next_state"])).float().squeeze()
+        b_d = torch.from_numpy(np.copy(b_memory["done"])).bool().squeeze()
 
         # get the evaluate q value
-        q_eval = self.eval_net(b_s).gather(1, b_a)                              # get the corresponding value of Q_value
+        q_eval = self.eval_net(b_s).gather(1, b_a).squeeze()                    # get the corresponding value of Q_value
         q_next = self.target_net(b_s_).detach().squeeze()
-        q_target = b_r + GAMMA * q_next.max(1)[0].unsqueeze(0)
+        q_target = (b_r + GAMMA * q_next.max(1)[0].unsqueeze(0)).squeeze()
+
+        # if b_d is True, the q_target is b_r
+        for i in range(BATCH_SIZE):
+            if b_d[i]:
+                q_target[i] = b_r[i]
 
         loss = self.loss_func(q_eval, q_target)
         self.optimizer.zero_grad()                                      # clear the last stage remaining updating parameter
-        loss.backward()                                                 # 误差反向传播, 计算参数更新值
-        self.optimizer.step()                                           # 更新评估网络的所有参数
+        loss.backward()                                                 # calculate loss
+        self.optimizer.step()                                           # update the neural nets parameters
 
 
 def train(map, starts, agent):
@@ -157,16 +168,16 @@ def train(map, starts, agent):
         agent.reset_agent()                                             # reset the agent
 
         # state consists of current map(block,other agents as block) and position
-        cur_map[agent.pos[0]][agent.pos[1]] = 3                         # 3 indicates the current position in the map
-        s = torch.FloatTensor(cur_map).view(1, -1)                      # matrx to a row indicate the state
+        cur_map[agent.pos[0]][agent.pos[1]] = 4                         # 4 indicates the current position in the map
+        s = torch.FloatTensor(cur_map).view(1, -1)                      # matrix to a row indicate the state
 
         while True:                                                     # start an episode (each loop indicates a step)
             a = dqn.choose_action(s)                                    # input the current state and choose an action
             s_, r, done = agent.nextStep(a, cur_map)                    # conduct action and require feedback,
 
             cur_map, cur_pos = s_                                       # unwrap the next state
-            cur_map[cur_pos[0]][cur_pos[1]] = 3                         # 3 indicates the current position in the map
-            s_ = torch.FloatTensor(cur_map).view(1, -1)                 # matrx to a row indicate the state
+            cur_map[cur_pos[0]][cur_pos[1]] = 4                         # 4 indicates the current position in the map
+            s_ = torch.FloatTensor(cur_map).view(1, -1)                 # matrix to a row indicate the state
 
             dqn.store_transition(s, a, r, s_, done)                     # store transition
 
@@ -195,5 +206,4 @@ if __name__ == '__main__':
     my_map, starts, goals = import_mapf_instance(filename)
     pos = list(starts[index])
     agent = Agent(index, pos, goals[index])
-
     train(my_map, starts, agent)
