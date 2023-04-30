@@ -23,15 +23,8 @@ N_STATES = 100        # an agent state include the agent position and map state
 
 
 # action map: 0: up, 1: down, 2: right, 3: left, 4: stay
-Action_map = {0: [1, 0], 1: [-1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
-Index_action_map = {(1, 0): 0, (-1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
-
-def print_map(s):
-    map, pos = s
-    map[pos[0]][pos[1]] = 3
-    for i in range(len(map)):
-        print(map[i])
-
+Action_map = {0: [-1, 0], 1: [1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
+Index_action_map = {(-1, 0): 0, (1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
 
 def env_reset(my_map, starts, agent):
     #----------------------------------------------#
@@ -63,20 +56,24 @@ def env_reset(my_map, starts, agent):
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(N_STATES, 50)                  # input layer: input should be map size
+        self.fc1 = nn.Linear(N_STATES, 3)                   # input layer: input should be map size
         self.fc1.weight.data.normal_(0, 0.1)                # normalization with average 0 and sdv with 0.1
-        self.fc2 = nn.Linear(50, N_ACTIONS)                 # hidden layer
-        self.fc2.weight.data.normal_(0, 0.1)                # normalization
+        self.fc2 = nn.Linear(3, 5)
+        self.fc2.weight.data.normal_(0, 0.1)
+        self.fc3 = nn.Linear(5, N_ACTIONS)                  # hidden layer
+        self.fc3.weight.data.normal_(0, 0.1)                # normalization              # normalization
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        actions_value = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        actions_value = self.fc3(x)
         return actions_value
 
 
 def choose_action(target_net, x):
     if np.random.uniform() < EPSILON:                       # choose network best action or random action base on epsilon
         actions_value = target_net.forward(x)               # get action value from target net work
+        print(actions_value)
         action_index = int(torch.argmax(actions_value))     # get the index of most possible action
     else:                                                   # random action
         action_index = np.random.randint(0, N_ACTIONS)      # random action of the five action
@@ -88,7 +85,7 @@ def find_solution(agent, starts, map):
     all_path = []
     net = Net()
     net.load_state_dict(torch.load("target_net.pth"))       # load the trained state
-    print(net.state_dict())
+
     cur_map = env_reset(map, starts, agent)
 
     cur_map[agent.pos[0]][agent.pos[1]] = 4                 # 4 indicates the current position in the map
@@ -97,9 +94,8 @@ def find_solution(agent, starts, map):
     path = [tuple(agent.pos)]                               # the agent path
 
     while True:
-        print("Loop")
         a = choose_action(net, s)                           # input the current state and choose an action
-        print("action: ", a)
+
         s_, r, done = agent.nextStep(a, cur_map)            # conduct action and require feedback,
 
         cur_map, cur_pos = s_                               # unwrap the next state
@@ -131,14 +127,12 @@ if __name__ == '__main__':
                         help='The name of the instance file(s)')
     args = parser.parse_args()
     filename = args.instance
-    print("1")
     index = 0
     my_map, starts, goals = import_mapf_instance(filename)
     pos = list(starts[index])
     agent = Agent(index, pos, goals[index])
-    print("2")
+
     path = find_solution(agent, copy.deepcopy(starts), copy.deepcopy(my_map))
-    print("3")
     print("all path: ", path)
 
     animation = Animation(my_map, starts, goals, path)

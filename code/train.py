@@ -13,17 +13,18 @@ from agent import Agent
 # hyper parameters
 BATCH_SIZE = 32                                 # batch size
 LR = 1e-3                                       # learning rate
-EPSILON = 0.9                                   # greedy policy
+EPSILON = 0.1                                   # initial greedy policy
 GAMMA = 0.9                                     # reward discount: close to 0 weights more on immediate and close 1 weight more on future reward
 TARGET_REPLACE_ITER = 100                       # target update frequency
-MEMORY_CAPACITY = 1000                          # memory capacity
+MEMORY_CAPACITY = 2000                          # memory capacity
 N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
 N_STATES = 100                                  # an agent state include the agent position and map state
+EPISODE = 3000                                  # episode number
 
 
-# action map: 1: up, 2: down, 3: right, 4: left, 5: stay
-Action_map = {0: [1, 0], 1: [-1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
-Index_action_map = {(1, 0): 0, (-1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
+# action map: 0: up, 1: down, 2: right, 3: left, 4: stay
+Action_map = {0: [-1, 0], 1: [1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
+Index_action_map = {(-1, 0): 0, (1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
 
 def print_map(s):
     map, pos = s
@@ -65,14 +66,17 @@ def env_reset(my_map, starts, agent):
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(N_STATES, 50)                                      # input layer: input should be map size
-        self.fc1.weight.data.normal_(0, 0.1)                                    # normalization with average 0 and sdv with 0.1
-        self.fc2 = nn.Linear(50, N_ACTIONS)                                     # hidden layer
-        self.fc2.weight.data.normal_(0, 0.1)                                    # normalization
+        self.fc1 = nn.Linear(N_STATES, 3)                   # input layer: input should be map size
+        self.fc1.weight.data.normal_(0, 0.1)                # normalization with average 0 and sdv with 0.1
+        self.fc2 = nn.Linear(3, 5)
+        self.fc2.weight.data.normal_(0, 0.1)
+        self.fc3 = nn.Linear(5, N_ACTIONS)                  # hidden layer
+        self.fc3.weight.data.normal_(0, 0.1)                # normalization
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        actions_value = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        actions_value = self.fc3(x)
         return actions_value
 
 
@@ -106,7 +110,7 @@ class DQN(object):
         if np.random.uniform() < EPSILON:                                       # choose network best action or random action base on epsilon
             actions_value = self.eval_net.forward(x)                            # get action value from target net work
             action_index = int(torch.argmax(actions_value))                     # get the index of most possible action
-        else:                                                                   # random action
+        else:
             action_index = np.random.randint(1, N_ACTIONS)                      # random action of the five action
 
         return Action_map[action_index]
@@ -159,37 +163,48 @@ class DQN(object):
 
 
 def train(map, starts, agent):
+    global EPSILON
+    total_reach_gaol = 0                                                # total reach goal number
+
     dqn = DQN()                                                         # initialize a dqn
     init_map = env_reset(map, starts, agent)                            # initial state: map, starts, goals
 
-    for i in range(1000):                                               # 1000 episode loop
-        print('<<<<<<<<<Episode: %s' % i)
-        cur_map = copy.deepcopy(init_map)                               # reset environment
-        agent.reset_agent()                                             # reset the agent
+    while EPSILON < 0.9:                                                # number of episode loop
+        print("------------------EPSILON: %s------------------" % EPSILON)
+        for i in range(int(EPISODE*(1-EPSILON))):                       # number of episode loop
+            print('<<<<<<<<<Episode: %s' % i)
+            cur_map = copy.deepcopy(init_map)                           # reset environment
+            agent.reset_agent()                                         # reset the agent
 
-        # state consists of current map(block,other agents as block) and position
-        cur_map[agent.pos[0]][agent.pos[1]] = 4                         # 4 indicates the current position in the map
-        s = torch.FloatTensor(cur_map).view(1, -1)                      # matrix to a row indicate the state
+            # state consists of current map(block,other agents as block) and position
+            cur_map[agent.pos[0]][agent.pos[1]] = 4                     # 4 indicates the current position in the map
+            s = torch.FloatTensor(cur_map).view(1, -1)                  # matrix to a row indicate the state
 
-        while True:                                                     # start an episode (each loop indicates a step)
-            a = dqn.choose_action(s)                                    # input the current state and choose an action
-            s_, r, done = agent.nextStep(a, cur_map)                    # conduct action and require feedback,
+            while True:                                                 # start an episode (each loop indicates a step)
+                a = dqn.choose_action(s)                                # input the current state and choose an action
+                s_, r, done = agent.nextStep(a, cur_map)                # conduct action and require feedback,
 
-            cur_map, cur_pos = s_                                       # unwrap the next state
-            cur_map[cur_pos[0]][cur_pos[1]] = 4                         # 4 indicates the current position in the map
-            s_ = torch.FloatTensor(cur_map).view(1, -1)                 # matrix to a row indicate the state
+                cur_map, cur_pos = s_                                   # unwrap the next state
+                cur_map[cur_pos[0]][cur_pos[1]] = 4                     # 4 indicates the current position in the map
+                s_ = torch.FloatTensor(cur_map).view(1, -1)             # matrix to a row indicate the state
 
-            dqn.store_transition(s, a, r, s_, done)                     # store transition
+                dqn.store_transition(s, a, r, s_, done)                 # store transition
 
-            s = s_                                                      # update state
-            print(dqn.memory_counter)
-            if dqn.memory_counter > MEMORY_CAPACITY:                    # trigger learning if 2000 memory capacity full
-                # start learning, (random select 32 transition and update eval_net)
-                # after 100 times learning, assign the eval_net to target_net
-                dqn.learn()
+                s = s_                                                  # update state
 
-            if done:                                                    # if finished
-                break
+                if dqn.memory_counter > MEMORY_CAPACITY:                # trigger learning if 2000 memory capacity full
+                    # start learning, (random select 32 transition and update eval_net)
+                    # after 100 times learning, assign the eval_net to target_net
+                    dqn.learn()
+
+                if done:                                                # if finished
+                    if r == 10000:                                      # if reach goal
+                        total_reach_gaol += 1
+                    break
+
+        EPSILON = EPSILON + 0.1                                         # increase the epsilon
+
+    print("Reach goal rate: %s" % (total_reach_gaol / (EPISODE * 10)))  # print the reach goal rate
 
     # save the net state
     torch.save(dqn.target_net.state_dict(), "target_net.pth")

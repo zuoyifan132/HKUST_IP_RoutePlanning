@@ -16,17 +16,18 @@ class Agent:
         # collide with block
         if map[self.pos[0]][self.pos[1]] == 2:
             print("COLLIDE WITH BLOCK")
-            return [True, float(-10000000)]
+            return [True, float(-100)]
         # collide with agent
         elif map[self.pos[0]][self.pos[1]] == 3:
             print("COLLIDE WITH AGENT")
-            return [True, float(-10000000)]
+            return [True, float(-100)]
         # reach goal
         elif self.pos[0] == goal[0] and self.pos[1] == goal[1]:
-            return [True, float(1)]
+            print("REACH GOAL!")
+            return [True, float(10000)]
         # does not collide
         else:
-            return [False, float(-1)]
+            return [False, float(-50)]
 
     def nextStep(self, action, map):
         # set the previous position to free: 1
