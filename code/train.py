@@ -9,34 +9,34 @@ import copy
 
 from run_experiments import import_mapf_instance
 from agent import Agent
+import config
 
 # hyper parameters
-BATCH_SIZE = 32                                 # batch size
-LR = 1e-3                                       # learning rate
-EPSILON = 0.1                                   # initial greedy policy
-GAMMA = 0.9                                     # reward discount: close to 0 weights more on immediate and close 1 weight more on future reward
-TARGET_REPLACE_ITER = 100                       # target update frequency
-MEMORY_CAPACITY = 2000                          # memory capacity
-N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
-N_STATES = 100                                  # an agent state include the agent position and map state
-EPISODE = 3000                                  # episode number
+BATCH_SIZE = config.BATCH_SIZE
+LR = config.LR
+EPSILON = config.EPSILON
+GAMMA = config.GAMMA
+TARGET_REPLACE_ITER = config.TARGET_REPLACE_ITER
+MEMORY_CAPACITY = config.MEMORY_CAPACITY
+N_ACTIONS = config.N_ACTIONS
+N_STATES = config.N_STATES
+EPISODE = config.EPISODE
 
 
-# action map: 0: up, 1: down, 2: right, 3: left, 4: stay
-Action_map = {0: [-1, 0], 1: [1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
-Index_action_map = {(-1, 0): 0, (1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
+'''
+    map encoding: 1: free grid, 2: block, 3: other agent, 4: self agent, goal: 5
+'''
 
 def print_map(s):
-    map, pos = s
-    map[pos[0]][pos[1]] = 3
-    for i in range(len(map)):
-        print(map[i])
+    for i in range(len(s)):
+        print(s[i])
+    print()
 
 
 # Reset the environment
 # Train single agent and by default train the first agent
 # Maybe changed later
-def env_reset(my_map, starts, agent):
+def env_reset(my_map, starts, agent, goal):
     #----------------------------------------------#
 
     # TODO:
@@ -47,14 +47,17 @@ def env_reset(my_map, starts, agent):
     # 1: free grid, 2: block, 3: other agent
     for i in range(len(my_map)):
         for j in range(len(my_map[0])):
-            my_map[i][j] = 1 if not my_map[i][j] else 2
+            my_map[i][j] = config.free_grid if not my_map[i][j] else config.block
 
     # treat other agents as block indicated by 3, true indicates block, exclude itself as block
     for x,y in starts[1:]:
-        my_map[x][y] = 3
+        my_map[x][y] = config.other_agent
 
-    # treat self as 4
-    my_map[starts[0][0]][starts[0][1]] = 4
+    # treat self as 100
+    my_map[starts[0][0]][starts[0][1]] = config.self_agent
+
+    # set goal in map
+    my_map[goal[0]][goal[1]] = config.goal
 
     # reset agent
     agent.reset_agent()
@@ -113,7 +116,7 @@ class DQN(object):
         else:
             action_index = np.random.randint(1, N_ACTIONS)                      # random action of the five action
 
-        return Action_map[action_index]
+        return config.Action_map[action_index]
 
     # Memory cache function used to store transition, each inout is a transition
     def store_transition(self, s, a, r, s_, done):
@@ -122,7 +125,7 @@ class DQN(object):
         index = self.memory_counter % MEMORY_CAPACITY                           # if memory is full, overwrite the old memory with new memory
 
         self.memory[index]['state'] = s
-        self.memory[index]['action'] = Index_action_map[tuple(a)]               # store the action index instead of action
+        self.memory[index]['action'] = config.Index_action_map[tuple(a)]               # store the action index instead of action
         self.memory[index]['reward'] = r
         self.memory[index]['next_state'] = s_
         self.memory[index]['done'] = done
@@ -147,7 +150,7 @@ class DQN(object):
         b_d = torch.from_numpy(np.copy(b_memory["done"])).bool().squeeze()
 
         # get the evaluate q value
-        q_eval = self.eval_net(b_s).gather(1, b_a).squeeze()                    # get the corresponding value of Q_value
+        q_eval = self.eval_net(b_s).gather(1, b_a.t()).squeeze()                # get the corresponding value of Q_value
         q_next = self.target_net(b_s_).detach().squeeze()
         q_target = (b_r + GAMMA * q_next.max(1)[0].unsqueeze(0)).squeeze()
 
@@ -162,12 +165,12 @@ class DQN(object):
         self.optimizer.step()                                           # update the neural nets parameters
 
 
-def train(map, starts, agent):
+def train(map, starts, agent, goal):
     global EPSILON
     total_reach_gaol = 0                                                # total reach goal number
 
     dqn = DQN()                                                         # initialize a dqn
-    init_map = env_reset(map, starts, agent)                            # initial state: map, starts, goals
+    init_map = env_reset(map, starts, agent, goal)                      # initial state: map, starts, goals
 
     while EPSILON < 0.9:                                                # number of episode loop
         print("------------------EPSILON: %s------------------" % EPSILON)
@@ -177,7 +180,8 @@ def train(map, starts, agent):
             agent.reset_agent()                                         # reset the agent
 
             # state consists of current map(block,other agents as block) and position
-            cur_map[agent.pos[0]][agent.pos[1]] = 4                     # 4 indicates the current position in the map
+            cur_map[agent.pos[0]][agent.pos[1]] = config.self_agent     # 100 indicates the current position in the map
+            #print_map(cur_map)
             s = torch.FloatTensor(cur_map).view(1, -1)                  # matrix to a row indicate the state
 
             while True:                                                 # start an episode (each loop indicates a step)
@@ -185,7 +189,7 @@ def train(map, starts, agent):
                 s_, r, done = agent.nextStep(a, cur_map)                # conduct action and require feedback,
 
                 cur_map, cur_pos = s_                                   # unwrap the next state
-                cur_map[cur_pos[0]][cur_pos[1]] = 4                     # 4 indicates the current position in the map
+                cur_map[cur_pos[0]][cur_pos[1]] = config.self_agent     # 100 indicates the current position in the map
                 s_ = torch.FloatTensor(cur_map).view(1, -1)             # matrix to a row indicate the state
 
                 dqn.store_transition(s, a, r, s_, done)                 # store transition
@@ -198,7 +202,7 @@ def train(map, starts, agent):
                     dqn.learn()
 
                 if done:                                                # if finished
-                    if r == 10000:                                      # if reach goal
+                    if r == 100:                                      # if reach goal
                         total_reach_gaol += 1
                     break
 
@@ -221,4 +225,4 @@ if __name__ == '__main__':
     my_map, starts, goals = import_mapf_instance(filename)
     pos = list(starts[index])
     agent = Agent(index, pos, goals[index])
-    train(my_map, starts, agent)
+    train(my_map, starts, agent, goals[0])

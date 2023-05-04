@@ -1,5 +1,5 @@
 import copy
-
+import config
 
 class Agent:
     def __init__(self, index, pos, goal):
@@ -16,18 +16,18 @@ class Agent:
         # collide with block
         if map[self.pos[0]][self.pos[1]] == 2:
             print("COLLIDE WITH BLOCK")
-            return [True, float(-100)]
+            return [True, config.collide_with_block]
         # collide with agent
         elif map[self.pos[0]][self.pos[1]] == 3:
             print("COLLIDE WITH AGENT")
-            return [True, float(-100)]
+            return [True, config.collide_with_agent]
         # reach goal
         elif self.pos[0] == goal[0] and self.pos[1] == goal[1]:
             print("REACH GOAL!")
-            return [True, float(10000)]
+            return [True, config.reach_goal]
         # does not collide
         else:
-            return [False, float(-50)]
+            return [False, config.doesnt_collide]
 
     def nextStep(self, action, map):
         # set the previous position to free: 1
@@ -42,11 +42,7 @@ class Agent:
 
         # if not done, change the current position to 4
         if not done:
-            map[self.pos[0]][self.pos[1]] = 4
-
-        # train the agent that will not always wait
-        if action == [0, 0]:
-            r = -2
+            map[self.pos[0]][self.pos[1]] = 100
 
         return [[map, self.pos], r, done]
 

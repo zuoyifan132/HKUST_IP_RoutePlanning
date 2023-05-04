@@ -26,7 +26,13 @@ N_STATES = 100        # an agent state include the agent position and map state
 Action_map = {0: [-1, 0], 1: [1, 0], 2: [0, 1], 3: [0, -1], 4: [0, 0]}
 Index_action_map = {(-1, 0): 0, (1, 0): 1, (0, 1): 2, (0, -1): 3, (0, 0): 4}
 
-def env_reset(my_map, starts, agent):
+
+def print_map(s):
+    for i in range(len(s)):
+        print(s[i])
+    print()
+
+def env_reset(my_map, starts, agent, goal):
     #----------------------------------------------#
 
     # TODO:
@@ -44,7 +50,10 @@ def env_reset(my_map, starts, agent):
         my_map[x][y] = 3
 
     # treat self as 4
-    my_map[starts[0][0]][starts[0][1]] = 4
+    my_map[starts[0][0]][starts[0][1]] = 100
+
+    # set goal in map
+    my_map[goal[0]][goal[1]] = 5
 
     # reset agent
     agent.reset_agent()
@@ -72,7 +81,8 @@ class Net(nn.Module):
 
 def choose_action(target_net, x):
     if np.random.uniform() < EPSILON:                       # choose network best action or random action base on epsilon
-        actions_value = target_net.forward(x)               # get action value from target net work
+        actions_value = target_net.forward(x)
+        print(x)# get action value from target net work
         print(actions_value)
         action_index = int(torch.argmax(actions_value))     # get the index of most possible action
     else:                                                   # random action
@@ -81,14 +91,15 @@ def choose_action(target_net, x):
     return Action_map[action_index]
 
 
-def find_solution(agent, starts, map):
+def find_solution(agent, starts, map, goal):
     all_path = []
     net = Net()
     net.load_state_dict(torch.load("target_net.pth"))       # load the trained state
 
-    cur_map = env_reset(map, starts, agent)
+    cur_map = env_reset(map, starts, agent, goal)
 
-    cur_map[agent.pos[0]][agent.pos[1]] = 4                 # 4 indicates the current position in the map
+    cur_map[agent.pos[0]][agent.pos[1]] = 100
+    print_map(cur_map)
     s = torch.FloatTensor(cur_map).view(1, -1)              # matrx to a row indicate the state
 
     path = [tuple(agent.pos)]                               # the agent path
@@ -99,7 +110,7 @@ def find_solution(agent, starts, map):
         s_, r, done = agent.nextStep(a, cur_map)            # conduct action and require feedback,
 
         cur_map, cur_pos = s_                               # unwrap the next state
-        cur_map[cur_pos[0]][cur_pos[1]] = 4                 # 4 indicates the current position in the map
+        cur_map[cur_pos[0]][cur_pos[1]] = 100                 # 4 indicates the current position in the map
         s_ = torch.FloatTensor(cur_map).view(1, -1)         # matrx to a row indicate the state
 
         path.append(tuple(agent.pos))
@@ -132,7 +143,7 @@ if __name__ == '__main__':
     pos = list(starts[index])
     agent = Agent(index, pos, goals[index])
 
-    path = find_solution(agent, copy.deepcopy(starts), copy.deepcopy(my_map))
+    path = find_solution(agent, copy.deepcopy(starts), copy.deepcopy(my_map), copy.deepcopy(goals[index]))
     print("all path: ", path)
 
     animation = Animation(my_map, starts, goals, path)
