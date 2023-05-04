@@ -2,13 +2,13 @@
 # hyper parameters
 BATCH_SIZE = 32                                 # batch size
 LR = 1e-3                                       # learning rate
-EPSILON = 0.1                                   # initial greedy policy
+EPSILON = 0.5                                   # initial greedy policy
 GAMMA = 0.9                                     # reward discount: close to 0 weights more on immediate and close 1 weight more on future reward
 TARGET_REPLACE_ITER = 100                       # target update frequency
 MEMORY_CAPACITY = 2000                          # memory capacity
 N_ACTIONS = 5                                   # there are 5 action: left, right, up, down, stay
 N_STATES = 100                                  # an agent state include the agent position and map state
-EPISODE = 2000                                  # episode number
+EPISODE = 400                                   # episode number
 
 # map encoding: 1: free grid, 2: block, 3: other agent, 100: self agent, goal: 5
 # self agent should be 100 number to make network treat self agent position significantly

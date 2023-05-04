@@ -202,7 +202,7 @@ def train(map, starts, agent, goal):
                     dqn.learn()
 
                 if done:                                                # if finished
-                    if r == 100:                                      # if reach goal
+                    if r == 100:                                        # if reach goal
                         total_reach_gaol += 1
                     break
 
