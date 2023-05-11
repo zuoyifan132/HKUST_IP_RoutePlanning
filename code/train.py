@@ -10,6 +10,7 @@ import copy
 from run_experiments import import_mapf_instance
 from agent import Agent
 import config
+from agent import all_agent_move
 
 # hyper parameters
 BATCH_SIZE = config.BATCH_SIZE
@@ -18,49 +19,45 @@ EPSILON = config.EPSILON
 GAMMA = config.GAMMA
 TARGET_REPLACE_ITER = config.TARGET_REPLACE_ITER
 MEMORY_CAPACITY = config.MEMORY_CAPACITY
-N_ACTIONS = config.N_ACTIONS
+NUM_ACTION = config.NUM_ACTION
+NUM_AGENT = config.NUM_AGENT
+N_ACTIONS = NUM_ACTION**NUM_AGENT
 N_STATES = config.N_STATES
 EPISODE = config.EPISODE
 
 
-'''
-    map encoding: 1: free grid, 2: block, 3: other agent, 4: self agent, goal: 5
-'''
-
+# print the mao
 def print_map(s):
     for i in range(len(s)):
         print(s[i])
     print()
 
+# read all agents
+def read_agents(file_name):
+    my_map, starts, goals = import_mapf_instance(file_name)
+    agents = []
+
+    for i in range(len(starts)):
+        pos = list(starts[i])
+        agent = Agent(i+config.self_agent, pos, goals[i])
+        agents.append(agent)
+
+    return [my_map, agents]
 
 # Reset the environment
-# Train single agent and by default train the first agent
-# Maybe changed later
-def env_reset(my_map, starts, agent, goal):
-    #----------------------------------------------#
-
-    # TODO:
-    # Train each agent
-
-    # ---------------------------------------------#
-
-    # 1: free grid, 2: block, 3: other agent
+def env_reset(my_map, agents):
+    # set free grid and block
     for i in range(len(my_map)):
         for j in range(len(my_map[0])):
             my_map[i][j] = config.free_grid if not my_map[i][j] else config.block
 
-    # treat other agents as block indicated by 3, true indicates block, exclude itself as block
-    for x,y in starts[1:]:
-        my_map[x][y] = config.other_agent
-
-    # treat self as 100
-    my_map[starts[0][0]][starts[0][1]] = config.self_agent
-
-    # set goal in map
-    my_map[goal[0]][goal[1]] = config.goal
-
-    # reset agent
-    agent.reset_agent()
+    for agent in agents:
+        # treat self as 100
+        my_map[agent.start[0]][agent.start[1]] = agent.index
+        # set goal in map
+        my_map[agent.goal[0]][agent.goal[1]] = config.goal
+        # reset agent
+        agent.reset_agent()
 
     return my_map
 
@@ -69,11 +66,11 @@ def env_reset(my_map, starts, agent, goal):
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(N_STATES, 3)                   # input layer: input should be map size
+        self.fc1 = nn.Linear(N_STATES, 20)                  # input layer: input should be map size
         self.fc1.weight.data.normal_(0, 0.1)                # normalization with average 0 and sdv with 0.1
-        self.fc2 = nn.Linear(3, 5)
+        self.fc2 = nn.Linear(20, 40)
         self.fc2.weight.data.normal_(0, 0.1)
-        self.fc3 = nn.Linear(5, N_ACTIONS)                  # hidden layer
+        self.fc3 = nn.Linear(40, N_ACTIONS)                  # output layer
         self.fc3.weight.data.normal_(0, 0.1)                # normalization
 
     def forward(self, x):
@@ -102,33 +99,34 @@ class DQN(object):
         # Define the compound data type for the transition
         transition_dtype = np.dtype([
             ('state', np.float64, (1, N_STATES)),
-            ('action', np.int64),
+            ('actions', np.int64),
             ('reward', np.float64),
             ('next_state',  np.float64, (1, N_STATES)),
             ('done', bool)
         ])
         self.memory = np.zeros((MEMORY_CAPACITY,), dtype=transition_dtype)      # initialize the memory, each row is a transition
 
+    # choose action for each agent
     def choose_action(self, x):
         if np.random.uniform() < EPSILON:                                       # choose network best action or random action base on epsilon
             actions_value = self.eval_net.forward(x)                            # get action value from target net work
-            action_index = int(torch.argmax(actions_value))                     # get the index of most possible action
+            best_actions_indexes = int(torch.argmax(actions_value))             # get the index of most possible action foe all agents
         else:
-            action_index = np.random.randint(1, N_ACTIONS)                      # random action of the five action
+            best_actions_indexes = np.random.randint(1, N_ACTIONS)              # random action of the five action
 
-        return config.Action_map[action_index]
+        return [config.Action_map[best_actions_indexes], best_actions_indexes]
 
     # Memory cache function used to store transition, each inout is a transition
-    def store_transition(self, s, a, r, s_, done):
+    def store_transition(self, s, a_i, r, s_, done):
         s_ = torch.FloatTensor(s_).view(1, -1)                                  # change the s_ shape to a row: 1*64
         # if the memory is full, overwrite the old transition
         index = self.memory_counter % MEMORY_CAPACITY                           # if memory is full, overwrite the old memory with new memory
 
         self.memory[index]['state'] = s
-        self.memory[index]['action'] = config.Index_action_map[tuple(a)]               # store the action index instead of action
         self.memory[index]['reward'] = r
         self.memory[index]['next_state'] = s_
         self.memory[index]['done'] = done
+        self.memory[index]['actions'] = a_i                                     # store the action index instead of action
 
         self.memory_counter += 1                                                # memory_counter + 1
 
@@ -144,7 +142,7 @@ class DQN(object):
         b_memory = self.memory[sample_index]                                    # get the corresponding transition
 
         b_s = torch.from_numpy(np.copy(b_memory["state"])).float().squeeze()
-        b_a = torch.from_numpy(np.copy(b_memory["action"])).long().unsqueeze(0) # use un-squeeze to change [32] to [32, 1]
+        b_a = torch.from_numpy(np.copy(b_memory["actions"])).long().unsqueeze(0)# use un-squeeze to change [32] to [[32, 5], 1]
         b_r = torch.from_numpy(np.copy(b_memory["reward"])).float().squeeze()
         b_s_ = torch.from_numpy(np.copy(b_memory["next_state"])).float().squeeze()
         b_d = torch.from_numpy(np.copy(b_memory["done"])).bool().squeeze()
@@ -165,35 +163,33 @@ class DQN(object):
         self.optimizer.step()                                           # update the neural nets parameters
 
 
-def train(map, starts, agent, goal):
+def train(map, agents):
     global EPSILON
     total_reach_gaol = 0                                                # total reach goal number
 
     dqn = DQN()                                                         # initialize a dqn
-    init_map = env_reset(map, starts, agent, goal)                      # initial state: map, starts, goals
+    init_map = env_reset(map, agents)                                   # initial state: map, starts, goals
 
     while EPSILON < 0.9:                                                # number of episode loop
         print("------------------EPSILON: %s------------------" % EPSILON)
         for i in range(int(EPISODE*(1-EPSILON))):                       # number of episode loop
             print('<<<<<<<<<Episode: %s' % i)
             cur_map = copy.deepcopy(init_map)                           # reset environment
-            agent.reset_agent()                                         # reset the agent
 
-            # state consists of current map(block,other agents as block) and position
-            cur_map[agent.pos[0]][agent.pos[1]] = config.self_agent     # 100 indicates the current position in the map
-            #print_map(cur_map)
+            for agent in agents:                                        # reset the agents
+                agent.reset_agent()
+                # state consists of current map(block,other agents as block) and position
+                cur_map[agent.pos[0]][agent.pos[1]] = agent.index       # agent index indicates the current position in the map
+
             s = torch.FloatTensor(cur_map).view(1, -1)                  # matrix to a row indicate the state
 
+            col_a = []                                                  # record the collision agents
+
             while True:                                                 # start an episode (each loop indicates a step)
-                a = dqn.choose_action(s)                                # input the current state and choose an action
-                s_, r, done = agent.nextStep(a, cur_map)                # conduct action and require feedback,
-
-                cur_map, cur_pos = s_                                   # unwrap the next state
-                cur_map[cur_pos[0]][cur_pos[1]] = config.self_agent     # 100 indicates the current position in the map
-                s_ = torch.FloatTensor(cur_map).view(1, -1)             # matrix to a row indicate the state
-
-                dqn.store_transition(s, a, r, s_, done)                 # store transition
-
+                a, a_i = dqn.choose_action(s)                           # input the current state output joint actions and action index
+                s_, r, done, col_a = all_agent_move(agents, a, cur_map) # all agents conduct action and require feedback
+                s_ = torch.FloatTensor(s_).view(1, -1)                  # matrix to a row indicate the state\
+                dqn.store_transition(s, a_i, r, s_, done)               # store transition
                 s = s_                                                  # update state
 
                 if dqn.memory_counter > MEMORY_CAPACITY:                # trigger learning if 2000 memory capacity full
@@ -202,7 +198,12 @@ def train(map, starts, agent, goal):
                     dqn.learn()
 
                 if done:                                                # if finished
-                    if r == 100:                                        # if reach goal
+                    count = 0
+                    for agent in agents:
+                        if agent.pos == agent.goal:
+                            count += 1
+                    if count == NUM_AGENT:                              # if reach goal
+                        print("All REACH GOAL")
                         total_reach_gaol += 1
                     break
 
@@ -220,9 +221,5 @@ if __name__ == '__main__':
                         help='The name of the instance file(s)')
     args = parser.parse_args()
     filename = args.instance
-
-    index = 0
-    my_map, starts, goals = import_mapf_instance(filename)
-    pos = list(starts[index])
-    agent = Agent(index, pos, goals[index])
-    train(my_map, starts, agent, goals[0])
+    my_map, agents = read_agents(filename)
+    train(my_map, agents)
