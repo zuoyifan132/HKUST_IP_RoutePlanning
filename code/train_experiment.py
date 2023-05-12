@@ -14,7 +14,7 @@ from agent import all_agent_move
 # hyper parameters
 BATCH_SIZE = config.BATCH_SIZE
 LR = config.LR
-EPSILON = config.EPSILON
+EPSILON = 0.99
 GAMMA = config.GAMMA
 TARGET_REPLACE_ITER = config.TARGET_REPLACE_ITER
 MEMORY_CAPACITY = config.MEMORY_CAPACITY
@@ -27,7 +27,8 @@ EPISODE = config.EPISODE
 
 def print_map(s):
     for i in range(len(s)):
-        print(s[i])
+        res = list(map(int, s[i]))
+        print(res)
     print()
 
 
@@ -50,11 +51,11 @@ class Net(nn.Module):
 
 
 def choose_action(target_net, x):
-    if np.random.uniform() < EPSILON:                               # choose network best action or random action base on epsilon
-        actions_value = target_net.forward(x)
-        best_actions_indexes = int(torch.argmax(actions_value))     # get the index of most possible action foe all agents
+    if np.random.uniform() < EPSILON:  # choose network best action or random action base on epsilon
+        actions_value = target_net.forward(x)  # get action value from target net work
+        best_actions_indexes = int(torch.argmax(actions_value))  # get the index of most possible action foe all agents
     else:
-        best_actions_indexes = np.random.randint(1, N_ACTIONS)      # random action of the five action
+        best_actions_indexes = np.random.randint(1, N_ACTIONS)  # random action of the five action
 
     return config.Action_map[best_actions_indexes]
 
@@ -67,11 +68,17 @@ def find_solution(agents, map):
     cur_map = env_reset(map, agents)
 
     print_map(cur_map)
+    print()
+
     s = torch.FloatTensor(cur_map).view(1, -1)              # matrx to a row indicate the state
 
     while True:
         a = choose_action(net, s)                           # input the current state and choose an action
-        s_, r, done = all_agent_move(agents, a, cur_map)    # all agents conduct action and require feedback
+        print("action: ", a)
+        s_, r, done = all_agent_move(agents, a, s)          # all agents conduct action and require feedback
+        print("rewad: ", r)
+        s_ = torch.FloatTensor(s_).view(config.map_height, config.map_width)
+        print_map(s_.tolist())
         s_ = torch.FloatTensor(s_).view(1, -1)              # matrx to a row indicate the state
         s = s_                                              # update state
 

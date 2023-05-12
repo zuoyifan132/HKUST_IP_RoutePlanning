@@ -29,8 +29,15 @@ EPISODE = config.EPISODE
 # print the mao
 def print_map(s):
     for i in range(len(s)):
-        print(s[i])
+        res = list(map(int, s[i]))
+        print(res)
     print()
+
+def print_statistic(reach_goal_rate_list):
+    print()
+    print("------------------------------Statistic------------------------------")
+    for each in reach_goal_rate_list:
+        print(each)
 
 # read all agents
 def read_agents(file_name):
@@ -165,14 +172,17 @@ class DQN(object):
 
 def train(map, agents):
     global EPSILON
-    total_reach_gaol = 0                                                # total reach goal number
-
+    total_reach_gaol = {}                                               # total reach goal number
+    reach_goal_rate = []                                                # each epsilon rate goal rate
     dqn = DQN()                                                         # initialize a dqn
     init_map = env_reset(map, agents)                                   # initial state: map, starts, goals
 
     while EPSILON < 0.9:                                                # number of episode loop
+        total_reach_gaol[str(EPSILON)] = 0                              # initialize each epsilon total reach goal
+
         print("------------------EPSILON: %s------------------" % EPSILON)
-        for i in range(int(EPISODE*(1-EPSILON))):                       # number of episode loop
+        num_episode_each_epsilon = int(EPISODE*(1-EPSILON))
+        for i in range(num_episode_each_epsilon):                       # number of episode loop
             print('<<<<<<<<<Episode: %s' % i)
             cur_map = copy.deepcopy(init_map)                           # reset environment
 
@@ -183,11 +193,12 @@ def train(map, agents):
 
             s = torch.FloatTensor(cur_map).view(1, -1)                  # matrix to a row indicate the state
 
-            col_a = []                                                  # record the collision agents
-
             while True:                                                 # start an episode (each loop indicates a step)
                 a, a_i = dqn.choose_action(s)                           # input the current state output joint actions and action index
-                s_, r, done, col_a = all_agent_move(agents, a, cur_map) # all agents conduct action and require feedback
+                print("action: ", a)
+                s_, r, done = all_agent_move(agents, a, s)              # all agents conduct action and require feedback
+                print("reward: ", r)
+                print_map(s_)
                 s_ = torch.FloatTensor(s_).view(1, -1)                  # matrix to a row indicate the state\
                 dqn.store_transition(s, a_i, r, s_, done)               # store transition
                 s = s_                                                  # update state
@@ -200,16 +211,18 @@ def train(map, agents):
                 if done:                                                # if finished
                     count = 0
                     for agent in agents:
-                        if agent.pos == agent.goal:
+                        if tuple(agent.pos) == agent.goal:
                             count += 1
                     if count == NUM_AGENT:                              # if reach goal
                         print("All REACH GOAL")
-                        total_reach_gaol += 1
+                        total_reach_gaol[str(EPSILON)] += 1
                     break
+
+        reach_goal_rate.append("For EPSILON " +str(round(EPSILON, 1)) + ", Reach goal rate: " + str(total_reach_gaol[str(EPSILON)] / num_episode_each_epsilon))
 
         EPSILON = EPSILON + 0.1                                         # increase the epsilon
 
-    print("Reach goal rate: %s" % (total_reach_gaol / (EPISODE * 10)))  # print the reach goal rate
+    print_statistic(reach_goal_rate)                                    # print the reach goal rate statistic
 
     # save the net state
     torch.save(dqn.target_net.state_dict(), "target_net.pth")
